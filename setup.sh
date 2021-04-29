@@ -50,3 +50,4 @@ cd ..
 pip install gdown
 gdown https://drive.google.com/uc?id=1ZjuNPGIDr89EXJD0Z7TeV2sAymOa69ps
 tar -xf gerrard-hall.tar.gz
+rm gerrard-hall.tar.gz
