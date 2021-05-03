@@ -132,3 +132,12 @@ dmypy.json
 data
 colmap*/
 gerrard-hall*/
+
+# stuff inside database_processing
+database_processing/images
+database_processing/sparse
+database_processing/database.db
+
+database_processing/database.db-shm 
+database_processing/database.db-wal
+# database_processing/kps.txt
