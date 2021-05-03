@@ -9,12 +9,9 @@ from matplotlib import pyplot as plt
 import cv2
 cv2.ocl.setUseOpenCL(False)
 
-input_data_path = "../SfM_quality_evaluation/Benchmarking_Camera_Calibration_2008/fountain-P11/images/"
-
-# @todo: Fill this with correct value
-K = np.array([[2759.48, 0, 1520.69], [0, 2764.16, 1006.81], [0, 0, 1]])
-
-import numpy as np
+input_data_path_base = "../SfM_quality_evaluation/Benchmarking_Camera_Calibration_2008/fountain-P11/"
+input_data_path = input_data_path_base + "images/"
+K = np.genfromtxt(fname=input_data_path+"K.txt")
 
 THRESHOLD_FACTOR = 6
 
@@ -374,11 +371,34 @@ def form_projection_matrix(R, t):
     # to return the 4x4 projection matrix for easy mul
     mat = np.eye(4)
     mat[:3, :3] = R
-    mat[:3, 0] = t[0]
-    mat[:3, 1] = t[1]
-    mat[:3, 2] = t[2]
-    
+    mat[0, 3] = t[0]
+    mat[1, 3] = t[1]
+    mat[2, 3] = t[2]
     return mat
+
+def pts2ply(pts,colors,filename='out.ply'): 
+    """Saves an ndarray of 3D coordinates (in meshlab format)"""
+
+    with open(filename,'w') as f: 
+        f.write('ply\n')
+        f.write('format ascii 1.0\n')
+        f.write('element vertex {}\n'.format(pts.shape[0]))
+        
+        f.write('property float x\n')
+        f.write('property float y\n')
+        f.write('property float z\n')
+        
+        f.write('property uchar red\n')
+        f.write('property uchar green\n')
+        f.write('property uchar blue\n')
+        
+        f.write('end_header\n')
+        
+        #pdb.set_trace()
+        colors = (255*colors).astype(int)
+        for pt, cl in zip(pts,colors): 
+            f.write('{} {} {} {} {} {}\n'.format(pt[0],pt[1],pt[2],
+                                                cl[0],cl[1],cl[2]))
 
 
 if __name__ == '__main__':
@@ -387,11 +407,13 @@ if __name__ == '__main__':
     images_list.sort()
     # images_list = images_list[::20]
 
-    all_corres = []#np.empty((0,4))
+    global_points = np.empty((0,4))
+    all_colors = np.empty((0,3))
+
 
     curr_pose = np.eye(4)
     
-    for i in range(len(images_list) - 1):
+    for i in range(4):#len(images_list) - 1):
         img1 = cv2.imread(images_list[i])
         img2 = cv2.imread(images_list[i+1])
 
@@ -408,8 +430,8 @@ if __name__ == '__main__':
         
         points1 = [gms.keypoints_image1[mat.queryIdx].pt for mat in matches] 
         points2 = [gms.keypoints_image2[mat.trainIdx].pt for mat in matches]
-        corres = np.hstack((np.asarray(points1), np.asarray(points2)))
-        all_corres.append(corres)
+        # corres = np.hstack((np.asarray(points1), np.asarray(points2)))
+        # all_corres.append(corres)
 
         # gms.draw_matches(img1, img2, DrawingType.ONLY_LINES)
         # gms.draw_matches(img1, img2, DrawingType.COLOR_CODED_POINTS_XpY)
@@ -466,25 +488,31 @@ if __name__ == '__main__':
             # print(X)
         points3d = np.array(points3d)
         # print(form_projection_matrix(R, t), curr_pose)
-        print("before", points3d)
+        
         points3d = curr_pose @ points3d.T
         points3d = points3d.T
-        curr_pose = form_projection_matrix(R.T, -R.T @ t) @ curr_pose
-        print("after", points3d)
-
+        curr_pose = np.linalg.inv(form_projection_matrix(R, t) @ curr_pose)
+        
         # p2 = M2 @ points3d.T
         # p2 /= p2[2]
         # print(p2.T, points2)
         # reproj = np.mean(np.sum((p2[:2].T - points2)**2, axis = 1))
         # print(reproj)
+        global_points = np.vstack((global_points, points3d))
+        all_colors = np.vstack((all_colors, Color))
 
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-        print(np.max(points3d, axis = 0))
-        ax.scatter(points3d[:, 0], points3d[:, 1], points3d[:, 2], c = Color)
-        plt.show()
+    # coz im lazy to figure out how to use np transpose :p
+    rgb = np.zeros_like(all_colors)
+    rgb[:, 0] = all_colors[:, 2] 
+    rgb[:, 1] = all_colors[:, 1] 
+    rgb[:, 2] = all_colors[:, 0] 
+    print(rgb)
+    pts2ply(global_points, rgb, "out.ply")
 
-    # K = np.eye(3)
-    # cv2.sfm.reconstruct(all_corres, K, is_projective=True)
+    dsf = 10
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(global_points[::dsf, 0], global_points[::dsf, 1], global_points[::dsf, 2], c = rgb[::dsf])
+    plt.show()
 
     
