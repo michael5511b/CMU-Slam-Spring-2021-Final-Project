@@ -360,14 +360,19 @@ def remove_images_table(db):
 
 # If we want to use our own image, the database needs to match the image name with the image index
 def create_image_table(db, image_folder_path, prefix="ezgif-frame-"):
+    # Create image table
+    db.executescript(CREATE_IMAGES_TABLE)
     # Get all image file names
     _, _, filenames = next(walk(image_folder_path))
     for image_file in filenames:
         # Get ids, throwing away file name prefixes and getting the remaining number id
-        id = int(image_id.replace("prefix", ""))
+        if image_file == "K.txt":
+            continue
+        id = int(image_file.replace("prefix", "").split(".")[0])
         db.add_image(image_file, camera_id=1,
                   prior_q=np.full(4, np.NaN), prior_t=np.full(3, np.NaN), image_id=id)
         db.commit()
+    print("Images table created with: ", image_folder_path)
 
 # Generate dictionary to find image id given image file name
 def img_file_to_id(db):
@@ -433,8 +438,29 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     db = COLMAPDatabase.connect(args.database_path)
-    
-    remove_keypoints_table(db)
-    # remove_matches_table(db)
+    cur = db.cursor()
+    ##
+    # matches = cur.execute("SELECT * FROM matches")
+    # for row in matches:
+    #     # print(row[2])
+    #     if row[3] != None:
 
+    #         params = blob_to_array(row[3], np.float64)
+    #         print(params)
+    #         print(len(params))
+    #         print(len(params[0]))
+    #         break
+    #     # print(row[3])
+        
+    ##
+
+    remove_keypoints_table(db)
+    remove_matches_table(db)
+    remove_inlier_matches_table(db)
+    remove_descriptors_table(db)
+    remove_images_table(db)
+
+    create_image_table(db, "../data/fountain-P11/images", prefix="")
     create_keypoints_table(db, "kps.txt")
+
+    # print(np.random.randint(1000, size=(50, 2)).shape)
