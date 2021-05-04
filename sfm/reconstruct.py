@@ -7,11 +7,16 @@ import glob
 import numpy as np
 from matplotlib import pyplot as plt
 import cv2
+from scipy import optimize
+from sift_matcher import *
 cv2.ocl.setUseOpenCL(False)
 
-input_data_path_base = "../SfM_quality_evaluation/Benchmarking_Camera_Calibration_2008/fountain-P11/"
+input_data_path_base = "../SfM_quality_evaluation/Benchmarking_Camera_Calibration_2008/Herz-Jesus-P8/"
 input_data_path = input_data_path_base + "images/"
-K = np.genfromtxt(fname=input_data_path+"K.txt")
+
+input_data_path = "custom/"
+# K = np.genfromtxt(fname=input_data_path+"K.txt")
+K = np.array([[2759.48, 0, 1520.69], [0, 2764.16, 1006.81], [0, 0, 1]])
 
 THRESHOLD_FACTOR = 6
 
@@ -318,7 +323,7 @@ class GmsMatcher:
             if score < thresh:
                 self.cell_pairs[i] = -2
 
-    def draw_matches(self, src1, src2, drawing_type):
+    def draw_matches(self, src1, src2, drawing_type, i):
         height = max(src1.shape[0], src2.shape[0])
         width = src1.shape[1] + src2.shape[1]
         output = np.zeros((height, width, 3), dtype=np.uint8)
@@ -364,7 +369,7 @@ class GmsMatcher:
 
 
         cv2.imshow('show', output)
-        cv2.imwrite("out_gms.jpg", output)
+        cv2.imwrite("out_gms" + str(i) + ".jpg", output)
         cv2.waitKey()
 
 def form_projection_matrix(R, t):
@@ -400,10 +405,77 @@ def pts2ply(pts,colors,filename='out.ply'):
             f.write('{} {} {} {} {} {}\n'.format(pt[0],pt[1],pt[2],
                                                 cl[0],cl[1],cl[2]))
 
+def rodrigues(r):
+    theta = np.sqrt(np.sum(np.square(r)))
+    if(theta == 0):
+    	R = np.eye(3)
+    else:
+    	u = r / theta
+    	ux = np.array([[0, -u[2], u[1]], [u[2], 0, -u[0]], [-u[1], u[0], 0]])
+    	R = np.eye(3) * np.cos(theta) + ((1 - np.cos(theta)) * np.matmul(u, u.T)) + np.sin(theta) * ux
+
+    return R
+
+def invRodrigues(R):
+    theta = np.arccos((np.trace(R) - 1) / 2)
+    if(theta != 0):
+    	omega = (0.5 / np.sin(theta)) * np.array([R[2, 1] - R[1, 2], R[0, 2] - R[2, 0], R[1, 0] - R[0, 1]])
+    	omega = omega.reshape(3, 1)
+    	r = omega * theta
+    else:
+    	r = np.zeros((3, 1))
+
+    return r
+
+def rodriguesResidual(K1, M1, p1, K2, p2, x):
+    w = x[0 : -6]
+    w = w.reshape(p1.shape[0], 3)
+    W = np.vstack((w.T, np.ones((1, p1.shape[0]))))
+
+    R2 = rodrigues(x[-6 : -3])
+    M2 = np.hstack((R2, x[-3 :].reshape(3, 1)))
+
+    p1_hat = np.matmul(np.matmul(K1, M1), W)#3 * N
+    p1_hat = p1_hat[0 : 2, :] / p1_hat[2, :]
+
+    p2_hat = np.matmul(np.matmul(K2, M2), W)#3 * N
+    p2_hat = p2_hat[0 : 2, :] / p2_hat[2, :]
+
+    residuals = np.concatenate([(p1 - p1_hat.T).reshape([-1]), (p2 - p2_hat.T).reshape([-1])])
+
+    return residuals.reshape(-1, 1)
+
+def bundleAdjustment(K1, M1, p1, K2, M2_init, p2, P_init):
+    N = p1.shape[0]
+    r_init = invRodrigues(M2_init[0 : 3, 0 : 3])
+    r_init = r_init.reshape(3, 1)
+    t_init = M2_init[0 : 3, 3].reshape(3, 1)
+
+    initialx = np.append(P_init, np.array([r_init, t_init]))
+    # print(P_init.shape)
+
+    func = lambda x: (rodriguesResidual(K1, M1, p1, K2, p2, x)**2).sum()
+
+    res = optimize.minimize(func, initialx, method='L-BFGS-B')
+
+    result = res.x
+    w = result[0 : -6].reshape(N, 3)
+    R2 = rodrigues(result[-6 : -3])
+    M2 = np.hstack((R2, result[-3 :].reshape(3, 1)))
+
+    return M2, w
+
+def calc_reprojection_error(M2, points3d, points2):
+    p2 = M2 @ points3d.T
+    p2 /= p2[2]
+    reproj = np.mean(np.sum((p2[:2].T - points2)**2, axis = 1))
+    print(reproj)
+    return reproj
+
 
 if __name__ == '__main__':
 
-    images_list = glob.glob(input_data_path + '*.jpg')
+    images_list = glob.glob(input_data_path + '*.jpeg')
     images_list.sort()
     # images_list = images_list[::20]
 
@@ -413,11 +485,13 @@ if __name__ == '__main__':
 
     curr_pose = np.eye(4)
     
-    for i in range(4):#len(images_list) - 1):
+    for i in range(0, len(images_list) - 1):
         img1 = cv2.imread(images_list[i])
         img2 = cv2.imread(images_list[i+1])
 
         ########## find feat corres
+        # GMS
+        '''
         orb = cv2.ORB_create(10000)
         orb.setFastThreshold(0)
         if cv2.__version__.startswith('3'):
@@ -434,8 +508,9 @@ if __name__ == '__main__':
         # all_corres.append(corres)
 
         # gms.draw_matches(img1, img2, DrawingType.ONLY_LINES)
-        # gms.draw_matches(img1, img2, DrawingType.COLOR_CODED_POINTS_XpY)
-
+        gms.draw_matches(img1, img2, DrawingType.COLOR_CODED_POINTS_XpY, i)
+        '''
+        points1, points2 = MatchFeatures(img1, img2, i)
 
         ########## Find essential matrix
         points1 = np.int32(points1)
@@ -471,6 +546,7 @@ if __name__ == '__main__':
         NumPoints = points1.shape[0]
         points3d = []
         Color = []
+        valid_indices = []
         for Point in range(NumPoints):
             A = np.zeros((4, 4))
             A[0] = points1[Point, 1] * M1[2] - M1[1]
@@ -484,35 +560,42 @@ if __name__ == '__main__':
                 continue
             Color.append(img1[points1[Point, 1], points1[Point, 0]] / 255.0)
             points3d.append(X)
+            valid_indices.append(Point)
 
             # print(X)
+
         points3d = np.array(points3d)
-        # print(form_projection_matrix(R, t), curr_pose)
+        feat2d1 = points1[valid_indices]
+        feat2d2 = points2[valid_indices]
         
+        err = calc_reprojection_error(M2, points3d, feat2d2)
+        # print(form_projection_matrix(R, t), curr_pose)
+        extrinsics2 = np.hstack((R, t))
+        extrinsics1 = np.hstack((np.eye(3), np.zeros((3,1))))
+        # print(points3d)
+        # extrinsics2, points3d = bundleAdjustment(K, extrinsics1, feat2d1, K, extrinsics2, feat2d2, points3d[:, :3])
+        # points3d = np.hstack((points3d, np.ones((points3d.shape[0], 1))))
+        # # # print(points3d)
+        # calc_reprojection_error(K @ extrinsics2, points3d, feat2d2)
+
         points3d = curr_pose @ points3d.T
         points3d = points3d.T
-        curr_pose = np.linalg.inv(form_projection_matrix(R, t) @ curr_pose)
-        
-        # p2 = M2 @ points3d.T
-        # p2 /= p2[2]
-        # print(p2.T, points2)
-        # reproj = np.mean(np.sum((p2[:2].T - points2)**2, axis = 1))
-        # print(reproj)
-        global_points = np.vstack((global_points, points3d))
-        all_colors = np.vstack((all_colors, Color))
+        curr_pose = np.linalg.inv(form_projection_matrix(extrinsics2[:3,:3], extrinsics2[:3,3]) @ curr_pose)
+
+        if err < np.inf:
+            global_points = np.vstack((global_points, points3d))
+            all_colors = np.vstack((all_colors, Color))
 
     # coz im lazy to figure out how to use np transpose :p
     rgb = np.zeros_like(all_colors)
     rgb[:, 0] = all_colors[:, 2] 
     rgb[:, 1] = all_colors[:, 1] 
     rgb[:, 2] = all_colors[:, 0] 
-    print(rgb)
+    # print(rgb)
     pts2ply(global_points, rgb, "out.ply")
 
-    dsf = 10
+    dsf = 1
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
     ax.scatter(global_points[::dsf, 0], global_points[::dsf, 1], global_points[::dsf, 2], c = rgb[::dsf])
     plt.show()
-
-    

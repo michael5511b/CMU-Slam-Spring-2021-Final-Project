@@ -136,8 +136,51 @@ class GmsMatcher:
         for i in range(len(mask)):
             if mask[i]:
                 self.gms_matches.append(all_matches[i])
+        
         return self.gms_matches
 
+    def colmap_writetotxt(self, file1, file2):
+        num_feat = len(self.gms_matches)
+        sift = cv2.cv2.xfeatures2d.SIFT_create()
+
+        feats = []
+        for i in range(num_feat):
+            # print(self.keypoints_image1[self.gms_matches[i].queryIdx].pt, descriptors_image1[self.gms_matches[i].queryIdx])
+            feats.append(self.keypoints_image1[self.gms_matches[i].queryIdx])
+        siftfeats, desc = sift.compute(img1, feats)
+
+        # write to txt
+        f1 = open(file1, 'w')
+        f1.write(str(num_feat) + " 128\n")
+        
+        for i in range(num_feat):
+            pt = feats[i].pt
+            scale = siftfeats[i].size
+            angle = siftfeats[i].angle
+            f1.write(str(pt[0]) + " " + str(pt[1]) + " " + str(1.0) + " " + str(0.0) + " ")
+            for pts in desc[i]:
+                f1.write(str(pts) + " ")
+            f1.write("\n")
+
+        feats = []
+        for i in range(num_feat):
+            # print(self.keypoints_image1[self.gms_matches[i].queryIdx].pt, descriptors_image1[self.gms_matches[i].queryIdx])
+            feats.append(self.keypoints_image2[self.gms_matches[i].trainIdx])
+        siftfeats, desc = sift.compute(img2, feats)
+
+        # write to txt
+        f2 = open(file2, 'w')
+        f2.write(str(num_feat) + " 128\n")
+        
+        for i in range(num_feat):
+            pt = feats[i].pt
+            scale = siftfeats[i].size
+            angle = siftfeats[i].angle
+            f2.write(str(pt[0]) + " " + str(pt[1]) + " " + str(1.0) + " " + str(0.0) + " ")
+            for pts in desc[i]:
+                f2.write(str(pts) + " ")
+            f2.write("\n")
+      
     # Normalize Key points to range (0-1)
     def normalize_points(self, kp, size, npts):
         for keypoint in kp:
@@ -391,29 +434,30 @@ if __name__ == '__main__':
 
     curr_pose = np.eye(4)
 
-    for k in range(len(images_list)):
-        for i in range(k+1, len(images_list)):
-            img1 = cv2.imread(images_list[k])
-            img2 = cv2.imread(images_list[i])
+    for k in range(len(images_list)-1):
+        img1 = cv2.imread(images_list[k])
+        img2 = cv2.imread(images_list[k+1])
 
-            ########## find feat corres
-            orb = cv2.ORB_create(10000)
-            orb.setFastThreshold(0)
-            if cv2.__version__.startswith('3'):
-                matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
-            else:
-                matcher = cv2.BFMatcher_create(cv2.NORM_HAMMING)
-            gms = GmsMatcher(orb, matcher)
 
-            matches = gms.compute_matches(img1, img2)
-            
-            points1 = [gms.keypoints_image1[mat.queryIdx].pt for mat in matches] 
-            points2 = [gms.keypoints_image2[mat.trainIdx].pt for mat in matches]
-            corres = np.hstack((np.asarray(points1), np.asarray(points2)))
-            all_corres.append(corres)
+        ########## find feat corres
+        orb = cv2.ORB_create(10000)
+        orb.setFastThreshold(0)
+        if cv2.__version__.startswith('3'):
+            matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+        else:
+            matcher = cv2.BFMatcher_create(cv2.NORM_HAMMING)
+        gms = GmsMatcher(orb, matcher)
 
-            # gms.draw_matches(img1, img2, DrawingType.ONLY_LINES)
-            # gms.draw_matches(img1, img2, DrawingType.COLOR_CODED_POINTS_XpY)
+        matches = gms.compute_matches(img1, img2)
+        gms.colmap_writetotxt(images_list[k]+".txt", images_list[k+1]+".txt")
+        
+        points1 = [gms.keypoints_image1[mat.queryIdx].pt for mat in matches] 
+        points2 = [gms.keypoints_image2[mat.trainIdx].pt for mat in matches]
+        corres = np.hstack((np.asarray(points1), np.asarray(points2)))
+        all_corres.append(corres)
+
+        # gms.draw_matches(img1, img2, DrawingType.ONLY_LINES)
+        # gms.draw_matches(img1, img2, DrawingType.COLOR_CODED_POINTS_XpY)
 
 
 
